@@ -48,6 +48,15 @@
   <!-- PAGE CONTENT -->
   <main id="app"></main>
 
+  <!-- EDIT BAR (nur sichtbar wenn eingeloggt) -->
+  <div class="edit-bar" id="edit-bar" style="display:none;">
+    <button id="eb-toggle" class="btn btn-small magnetic">&#9998; Bearbeiten</button>
+    <span id="eb-actions" style="display:none;">
+      <button id="eb-save" class="btn btn-small btn-primary magnetic">Speichern</button>
+      <button id="eb-cancel" class="btn btn-small magnetic">Verwerfen</button>
+    </span>
+  </div>
+
   <script src="app.js"></script>
 </body>
 </html>

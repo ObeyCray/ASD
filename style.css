@@ -443,6 +443,49 @@ select.f-input { appearance: none; }
 .tm-rank { color: var(--text-muted); font-size: 0.75rem; }
 .tm-actions { display: flex; gap: 8px; }
 
+/* ─── BEARBEITEN-MODUS ───────────────────────────────────────── */
+.edit-bar {
+  position: fixed; bottom: 24px; right: 24px; z-index: 500;
+  display: flex; gap: 12px; align-items: center;
+  background: var(--surface); border: 1px solid var(--border);
+  padding: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+}
+#eb-actions { display: flex; gap: 12px; }
+
+.editable {
+  cursor: text;
+  outline: 1px dashed rgba(234, 179, 8, 0.4);
+  outline-offset: 4px;
+  min-width: 24px; min-height: 1em;
+  display: inline-block;
+  transition: outline-color 0.2s, background 0.2s;
+}
+.editable:hover { outline-color: rgba(234, 179, 8, 0.8); }
+.editable:focus { outline: 1px solid var(--accent); background: rgba(234, 179, 8, 0.05); }
+
+.x-del {
+  background: transparent; border: 1px solid var(--border); color: var(--danger);
+  font-family: var(--font-mono); font-size: 0.75rem;
+  width: 26px; height: 26px; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: all 0.3s;
+}
+.x-del:hover { background: var(--danger); color: var(--bg); border-color: var(--danger); }
+
+.x-add {
+  display: block; width: 100%;
+  background: transparent; border: 1px dashed var(--border); color: var(--text-muted);
+  font-family: var(--font-mono); font-size: 0.75rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.1em;
+  padding: 14px 20px; margin-top: 20px;
+  transition: all 0.3s;
+}
+.x-add:hover { border-color: var(--accent); color: var(--accent); }
+
+.edit-actions { padding: 40px 80px; border-bottom: 1px solid var(--border); }
+.rule-card { position: relative; }
+.rule-card > .x-del { position: absolute; top: 20px; right: 20px; }
+
 /* ─── RESPONSIVE ─────────────────────────────────────────────── */
 @media (max-width: 1024px) {
   .hero { grid-template-columns: 1fr; }

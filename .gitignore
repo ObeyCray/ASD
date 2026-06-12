@@ -1,0 +1,12 @@
+# Live-Daten des Servers — NIEMALS committen, das ist die Datenbank
+data.json
+evals.json
+
+# Nicht zum Projekt gehörende Dateien
+ASD Handbuch.zip
+assets/*.exe
+
+# System
+Thumbs.db
+.DS_Store
+node_modules/
