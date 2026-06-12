@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>A.S.D. OP-COM</title>
+  
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;700;800&display=swap" rel="stylesheet">
+  
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+  
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  
+  <!-- CUSTOM CURSOR -->
+  <div class="cursor" id="cursor"></div>
+  <div class="cursor-follower" id="cursor-follower"></div>
+
+  <!-- NOISE TEXTURE -->
+  <div class="noise"></div>
+
+  <!-- NAVIGATION -->
+  <nav class="nav">
+    <div class="nav-brand">
+      <a href="#" data-page="startseite" class="magnetic">
+        <span class="logo-mark">///</span> A.S.D.
+      </a>
+    </div>
+    
+    <div class="nav-links">
+      <a href="#" data-page="vorschriften" class="magnetic nav-link">Vorschriften</a>
+      <a href="#" data-page="kleidung" class="magnetic nav-link">Kleidung</a>
+      <a href="#" data-page="fahrzeuge" class="magnetic nav-link">Fahrzeuge</a>
+      <a href="#" data-page="ausbildung" class="magnetic nav-link">Ausbildung</a>
+      <a href="#" data-page="team" class="magnetic nav-link">Team</a>
+      <a href="#" data-page="intern" class="magnetic nav-link">Intern</a>
+    </div>
+
+    <div class="nav-meta">
+      <span id="clock" class="mono-text">00:00:00</span>
+      <span class="status-dot"></span>
+    </div>
+  </nav>
+
+  <!-- PAGE CONTENT -->
+  <main id="app"></main>
+
+  <script src="app.js"></script>
+</body>
+</html>
