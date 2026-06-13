@@ -402,6 +402,46 @@ textarea.f-input { resize: vertical; }
   font-family: var(--font-mono); font-size: 0.75rem; color: var(--text-muted);
   border-bottom: 1px solid var(--border); padding: 8px 0;
 }
+.eval-name-link { cursor: pointer; transition: color 0.2s; display: inline-block; }
+.eval-name-link:hover { color: var(--accent); }
+.pilot-cs { color: var(--text-muted); font-size: 0.8rem; font-family: var(--font-mono); }
+
+/* ─── PILOTEN-ÜBERSICHT ──────────────────────────────────────── */
+.pilot-row {
+  display: flex; justify-content: space-between; align-items: center; gap: 16px;
+  padding: 18px 24px; border: 1px solid var(--border); background: var(--surface);
+  margin-bottom: 12px; cursor: pointer; transition: border-color 0.2s, transform 0.2s;
+}
+.pilot-row:hover { border-color: var(--accent); transform: translateX(4px); }
+.pilot-name { font-weight: 600; }
+.pilot-sub {
+  font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: 0.05em; margin-top: 4px;
+}
+.pilot-stats { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+/* ─── PROFIL: STATISTIK & BALKEN ─────────────────────────────── */
+.stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+.stat-box {
+  border: 1px solid var(--border); background: var(--surface);
+  padding: 24px; text-align: center;
+}
+.stat-num { font-family: var(--font-display); font-size: 2.5rem; line-height: 1; }
+.stat-lbl {
+  font-family: var(--font-mono); font-size: 0.65rem; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: 0.1em; margin-top: 10px;
+}
+.crit-row {
+  display: grid; grid-template-columns: 160px 1fr 52px; gap: 16px; align-items: center;
+  padding: 10px 0; border-bottom: 1px solid var(--border);
+  font-family: var(--font-mono); font-size: 0.85rem;
+}
+.crit-row:last-child { border-bottom: none; }
+.crit-val { text-align: right; color: var(--accent); font-weight: 700; }
+.prog-row { cursor: pointer; transition: background 0.2s; }
+.prog-row:hover { background: rgba(234, 179, 8, 0.06); }
+.bar-track { height: 8px; background: var(--bg); border: 1px solid var(--border); overflow: hidden; }
+.bar-fill { height: 100%; transition: width 0.4s ease; }
 
 /* ─── TEAM ───────────────────────────────────────────────────── */
 .team-grid {
@@ -539,4 +579,7 @@ kbd {
   .kb-row.kb-edit { grid-template-columns: 1fr 70px 70px 32px; }
   .kb-fn { font-size: 0.85rem; }
   kbd { min-width: 28px; padding: 4px 6px; font-size: 0.7rem; }
+  .stat-grid { grid-template-columns: 1fr 1fr; }
+  .crit-row { grid-template-columns: 110px 1fr 44px; gap: 10px; }
+  .pilot-row { flex-direction: column; align-items: flex-start; }
 }

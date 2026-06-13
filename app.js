@@ -496,6 +496,61 @@ function evalStatus(rec) {
   return passed ? 'BESTANDEN' : 'OFFEN';
 }
 
+// Zeitstempel einer Akte (für Sortierung). Neue Akten haben rec.ts,
+// ältere fallen auf die aus der ID kodierte Erstellzeit zurück.
+function evalTs(rec) { return rec.ts || parseInt(rec.id, 36) || 0; }
+
+// Schlüssel, über den eine Akte einem Piloten zugeordnet ist:
+// bei aus dem Team gewählten Piloten die Team-ID, sonst der Name.
+function pilotKeyOf(rec) {
+  return rec.pilotId ? 'id:' + rec.pilotId : 'name:' + String(rec.name || '').trim().toLowerCase();
+}
+
+// Baut die Pilotenliste aus Team-Mitgliedern + allen bewerteten Namen.
+function buildPilots() {
+  const map = new Map();
+  getTeam().forEach(m => map.set('id:' + m.id, {
+    key: 'id:' + m.id, name: m.name, callsign: m.callsign, role: m.role, inTeam: true, evals: []
+  }));
+  getEvals().forEach(r => {
+    const key = pilotKeyOf(r);
+    if (!map.has(key)) {
+      map.set(key, { key, name: r.name || '—', callsign: r.callsign || '', role: '', inTeam: false, evals: [] });
+    }
+    map.get(key).evals.push(r);
+  });
+  return [...map.values()].map(p => {
+    const sorted = p.evals.slice().sort((a, b) => evalTs(b) - evalTs(a));
+    const avg = p.evals.length ? p.evals.reduce((s, r) => s + r.avg, 0) / p.evals.length : null;
+    return { ...p, evals: sorted, count: p.evals.length, latest: sorted[0] || null, avgAll: avg };
+  }).sort((a, b) => {
+    if (b.count !== a.count) return b.count - a.count;      // erst Piloten mit Akten
+    return a.name.localeCompare(b.name);
+  });
+}
+
+function pilotByKey(key) { return buildPilots().find(p => p.key === key); }
+
+// Durchschnitt je Einzelkriterium über mehrere Akten.
+function criteriaAverages(evals) {
+  const out = {};
+  RATING_CRITERIA.forEach(c => {
+    const vals = evals.map(r => r.ratings[c.key]).filter(v => typeof v === 'number');
+    out[c.key] = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+  });
+  return out;
+}
+
+// Ansichtszustand innerhalb des Intern-Bereichs.
+let INTERN_VIEW = { view: 'dashboard', pilotKey: null, evalId: null };
+let PENDING_EDIT_EVAL = null;
+
+function internGoto(view, opts = {}) {
+  INTERN_VIEW = { view, pilotKey: opts.pilotKey || null, evalId: opts.evalId || null };
+  renderNow('intern');
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
 // ─── PAGE DATA ───────────────────────────────────────────────
 const pages = {
 
@@ -849,6 +904,9 @@ const pages = {
       </div>`;
     }
 
+    if (INTERN_VIEW.view === 'profile') return internProfile(user);
+    if (INTERN_VIEW.view === 'eval') return internEvalDetail(user);
+
     return `
     <div class="page-header">
       <div class="ph-content">
@@ -858,10 +916,7 @@ const pages = {
       </div>
     </div>
 
-    <div class="intern-bar">
-      <span class="mono-text">ANGEMELDET ALS: <b style="color:var(--accent)">${esc(user.toUpperCase())}</b> // BEARBEITEN-MODUS AUF ALLEN SEITEN VERFÜGBAR</span>
-      <button class="btn btn-small magnetic" id="logout-btn">Logout</button>
-    </div>
+    ${internBar(user)}
 
     <section class="section">
       <div class="section-meta"><div class="sm-title">NEUE BEWERTUNG</div></div>
@@ -870,8 +925,14 @@ const pages = {
           <input type="hidden" id="ev-id">
           <div class="form-grid">
             <div>
-              <label class="f-label" for="ev-name">Pilot / Flight Student</label>
-              <input class="f-input" type="text" id="ev-name" placeholder="NAME" required>
+              <label class="f-label" for="ev-pilot">Pilot / Flight Student</label>
+              <select class="f-input" id="ev-pilot">
+                <option value="">— Aus Team wählen —</option>
+                ${getTeam().map(m => `<option value="${m.id}">[${esc(m.callsign)}] ${esc(m.name)} · ${esc(m.role)}</option>`).join('')}
+                <option value="__manual__">+ Manuell eingeben…</option>
+              </select>
+              <input class="f-input" type="text" id="ev-name" placeholder="NAME" style="margin-top:12px;display:none;">
+              <input type="hidden" id="ev-pilotid">
             </div>
             <div>
               <label class="f-label" for="ev-pruefer">Prüfer</label>
@@ -943,7 +1004,12 @@ const pages = {
     </section>
 
     <section class="section">
-      <div class="section-meta"><div class="sm-title">AKTEN</div></div>
+      <div class="section-meta"><div class="sm-title">PILOTEN</div></div>
+      <div class="section-content"><div id="pilot-list"></div></div>
+    </section>
+
+    <section class="section">
+      <div class="section-meta"><div class="sm-title">LETZTE BEWERTUNGEN</div></div>
       <div class="section-content"><div id="eval-list"></div></div>
     </section>
 
@@ -1035,6 +1101,160 @@ const pages = {
   }
 };
 
+// ─── INTERN: VIEW-BAUSTEINE (Profil & Detail) ────────────────
+function internBar(user, extra = ' // BEARBEITEN-MODUS AUF ALLEN SEITEN VERFÜGBAR') {
+  return `
+    <div class="intern-bar">
+      <span class="mono-text">ANGEMELDET ALS: <b style="color:var(--accent)">${esc(user.toUpperCase())}</b>${extra}</span>
+      <button class="btn btn-small magnetic" id="logout-btn">Logout</button>
+    </div>`;
+}
+
+// Ein farbiger Balken 0–10.
+function ratingBar(val) {
+  const pct = Math.max(0, Math.min(100, (val / 10) * 100));
+  const col = val >= 7 ? 'var(--accent)' : val >= 4 ? '#f59e0b' : 'var(--danger)';
+  return `<div class="bar-track"><div class="bar-fill" style="width:${pct}%;background:${col}"></div></div>`;
+}
+
+// Vollständige Detail-Aufschlüsselung einer Akte (für die Detailseite).
+function evalDetailHTML(rec) {
+  const passed = evalStatus(rec) === 'BESTANDEN';
+  const module = [
+    { label: 'THEORIE', ok: rec.theorie, info: '' },
+    { label: 'STRECKE 1', ok: rec.s1.ok, info: [rec.s1.zeit && 'Zeit ' + rec.s1.zeit, rec.s1.hits && rec.s1.hits + ' Hits'].filter(Boolean).join(' · ') },
+    { label: 'STRECKE 2', ok: rec.s2.ok, info: [rec.s2.zeit && 'Zeit ' + rec.s2.zeit, rec.s2.hits && rec.s2.hits + ' Hits'].filter(Boolean).join(' · ') },
+    { label: 'EINSATZAUSBILDUNG', ok: rec.einsatz.ok, info: '' }
+  ];
+  return `
+    <div class="data-block">
+      <div class="db-header">
+        <span class="db-title">MODULE</span>
+        <span class="db-badge ${passed ? 'warn' : ''}">${evalStatus(rec)}</span>
+      </div>
+      <div class="db-body">
+        ${module.map(m => `
+        <div class="db-row">
+          <span class="db-label">${m.label}</span>
+          <span><span style="color:var(--text-muted);margin-right:12px;">${esc(m.info)}</span><span class="tag ${m.ok ? 'ok' : 'fail'}">${m.ok ? 'BESTANDEN ✓' : 'OFFEN ✗'}</span></span>
+        </div>`).join('')}
+      </div>
+    </div>
+
+    <div class="data-block" style="margin-top:24px;">
+      <div class="db-header"><span class="db-title">EINZELKRITERIEN</span><span class="db-badge warn">Ø ${rec.avg.toFixed(1)}</span></div>
+      <div class="db-body">
+        ${RATING_CRITERIA.map(c => `
+        <div class="crit-row">
+          <span class="db-label">${c.label}</span>
+          ${ratingBar(rec.ratings[c.key] ?? 0)}
+          <span class="crit-val">${rec.ratings[c.key] ?? '–'}/10</span>
+        </div>`).join('')}
+      </div>
+    </div>
+
+    ${rec.notes ? `<div class="rule-sub" style="margin-top:24px;">${nl2br(esc(rec.notes))}</div>` : ''}
+  `;
+}
+
+// Detailseite einer einzelnen Bewertung.
+function internEvalDetail(user) {
+  const rec = getEvals().find(r => r.id === INTERN_VIEW.evalId);
+  if (!rec) {
+    return `${internBar(user)}<section class="section" style="border-bottom:none;"><div class="section-meta"><div class="sm-title">FEHLER</div></div><div class="section-content"><p style="color:var(--text-muted)">Bewertung nicht gefunden.</p><button class="btn btn-small magnetic" id="back-dash" style="margin-top:20px;">Zurück</button></div></section>`;
+  }
+  const pilot = buildPilots().find(p => p.key === pilotKeyOf(rec));
+  return `
+    <div class="page-header">
+      <div class="ph-content">
+        <div class="ph-tag">05 // AKTE</div>
+        <h1 class="ph-title">${esc(rec.name)}</h1>
+        <p class="ph-desc">${esc(rec.date)} // Prüfer: ${esc(rec.pruefer)}</p>
+      </div>
+    </div>
+    ${internBar(user)}
+    <section class="section" style="border-bottom:none;">
+      <div class="section-meta">
+        <div class="sm-title">BEWERTUNG</div>
+        <div style="display:flex;flex-direction:column;gap:12px;margin-top:24px;">
+          <button class="btn btn-small magnetic" id="back-dash">← Übersicht</button>
+          ${pilot ? `<button class="btn btn-small magnetic" data-open-pilot="${esc(pilot.key)}">Profil: ${esc(rec.name)}</button>` : ''}
+          <button class="btn btn-small magnetic" data-ev-edit="${rec.id}">Bearbeiten</button>
+          <button class="btn btn-small magnetic" data-ev-del="${rec.id}" style="border-color:var(--danger);color:var(--danger);">Löschen</button>
+        </div>
+      </div>
+      <div class="section-content">${evalDetailHTML(rec)}</div>
+    </section>
+  `;
+}
+
+// Profilseite eines Piloten: Kopf, Verlauf, Kriterien-Schnitt, Akten.
+function internProfile(user) {
+  const p = pilotByKey(INTERN_VIEW.pilotKey);
+  if (!p) {
+    return `${internBar(user)}<section class="section" style="border-bottom:none;"><div class="section-meta"><div class="sm-title">FEHLER</div></div><div class="section-content"><p style="color:var(--text-muted)">Pilot nicht gefunden.</p><button class="btn btn-small magnetic" id="back-dash" style="margin-top:20px;">Zurück</button></div></section>`;
+  }
+  const chrono = p.evals.slice().sort((a, b) => evalTs(a) - evalTs(b)); // alt → neu
+  const crit = criteriaAverages(p.evals);
+  const trend = chrono.length >= 2 ? chrono[chrono.length - 1].avg - chrono[0].avg : null;
+
+  return `
+    <div class="page-header">
+      <div class="ph-content">
+        <div class="ph-tag">05 // PILOTENPROFIL</div>
+        <h1 class="ph-title">${esc(p.name)}</h1>
+        <p class="ph-desc">${p.callsign ? '[' + esc(p.callsign) + '] ' : ''}${esc(p.role || 'Nicht im Team')}</p>
+      </div>
+    </div>
+    ${internBar(user)}
+
+    <section class="section">
+      <div class="section-meta">
+        <div class="sm-title">ÜBERSICHT</div>
+        <button class="btn btn-small magnetic" id="back-dash" style="margin-top:24px;">← Übersicht</button>
+      </div>
+      <div class="section-content">
+        <div class="stat-grid">
+          <div class="stat-box"><div class="stat-num">${p.count}</div><div class="stat-lbl">Bewertungen</div></div>
+          <div class="stat-box"><div class="stat-num">${p.avgAll != null ? p.avgAll.toFixed(1) : '–'}</div><div class="stat-lbl">Ø Gesamt</div></div>
+          <div class="stat-box"><div class="stat-num">${p.latest ? (evalStatus(p.latest) === 'BESTANDEN' ? '✓' : '✗') : '–'}</div><div class="stat-lbl">Letzter Status</div></div>
+          <div class="stat-box"><div class="stat-num" style="color:${trend == null ? 'var(--text)' : trend >= 0 ? 'var(--accent)' : 'var(--danger)'}">${trend == null ? '–' : (trend >= 0 ? '+' : '') + trend.toFixed(1)}</div><div class="stat-lbl">Entwicklung</div></div>
+        </div>
+
+        ${chrono.length ? `
+        <div class="data-block" style="margin-top:40px;">
+          <div class="db-header"><span class="db-title">VERLAUF (Ø JE PRÜFUNG)</span></div>
+          <div class="db-body">
+            ${chrono.map(r => `
+            <div class="crit-row prog-row" data-prog="${r.id}">
+              <span class="db-label" style="white-space:nowrap;">${esc(r.date.split(' ')[0])}</span>
+              ${ratingBar(r.avg)}
+              <span class="crit-val">${r.avg.toFixed(1)}</span>
+            </div>`).join('')}
+          </div>
+        </div>
+
+        <div class="data-block" style="margin-top:24px;">
+          <div class="db-header"><span class="db-title">STÄRKEN & SCHWÄCHEN (Ø ALLER PRÜFUNGEN)</span></div>
+          <div class="db-body">
+            ${RATING_CRITERIA.map(c => `
+            <div class="crit-row">
+              <span class="db-label">${c.label}</span>
+              ${ratingBar(crit[c.key] ?? 0)}
+              <span class="crit-val">${crit[c.key] != null ? crit[c.key].toFixed(1) : '–'}</span>
+            </div>`).join('')}
+          </div>
+        </div>` : '<p style="color:var(--text-muted);font-family:var(--font-mono);font-size:.85rem;margin-top:40px;">// NOCH KEINE BEWERTUNGEN FÜR DIESEN PILOTEN</p>'}
+      </div>
+    </section>
+
+    <section class="section" style="border-bottom:none;">
+      <div class="section-meta"><div class="sm-title">AKTEN</div></div>
+      <div class="section-content"><div id="eval-list"></div></div>
+    </section>
+  `;
+}
+
 // ─── ROUTER & ANIMATIONS ──────────────────────────────────────
 function bindPageLinks(root) {
   root.querySelectorAll('[data-page]').forEach(el => {
@@ -1091,15 +1311,68 @@ function navigate(page) {
     CONTENT = loadContent();
     EDIT_MODE = false;
   }
+  INTERN_VIEW = { view: 'dashboard', pilotKey: null, evalId: null };
   history.pushState({ page }, '', '#' + page);
   render(page);
 }
 
 // ─── INTERN-LOGIK ─────────────────────────────────────────────
-function renderEvalList() {
+function populateEvalForm(rec) {
+  const sel = document.getElementById('ev-pilot');
+  const nameInput = document.getElementById('ev-name');
+  if (sel) {
+    if (rec.pilotId && getTeam().some(m => m.id === rec.pilotId)) {
+      sel.value = rec.pilotId;
+      nameInput.style.display = 'none';
+      nameInput.value = '';
+    } else {
+      sel.value = '__manual__';
+      nameInput.style.display = '';
+      nameInput.value = rec.name || '';
+    }
+  }
+  document.getElementById('ev-id').value = rec.id;
+  document.getElementById('ev-theorie-ok').checked = !!rec.theorie;
+  document.getElementById('ev-s1-zeit').value = rec.s1.zeit || '';
+  document.getElementById('ev-s1-hits').value = rec.s1.hits || '';
+  document.getElementById('ev-s1-ok').checked = !!rec.s1.ok;
+  document.getElementById('ev-s2-zeit').value = rec.s2.zeit || '';
+  document.getElementById('ev-s2-hits').value = rec.s2.hits || '';
+  document.getElementById('ev-s2-ok').checked = !!rec.s2.ok;
+  document.getElementById('ev-einsatz-ok').checked = !!rec.einsatz.ok;
+  document.getElementById('ev-notes').value = rec.notes || '';
+  RATING_CRITERIA.forEach(c => {
+    const val = rec.ratings[c.key] ?? 5;
+    document.getElementById('ev-r-' + c.key).value = val;
+    document.getElementById('ev-rv-' + c.key).innerText = val;
+  });
+  document.getElementById('ev-submit').innerText = 'Aktualisieren';
+  document.getElementById('ev-cancel').style.display = '';
+  document.getElementById('ev-avg').dispatchEvent(new Event('refresh'));
+}
+
+// Bearbeiten von überall: wenn nicht im Dashboard, dorthin wechseln und vormerken.
+function editEvalById(id) {
+  const rec = getEvals().find(r => r.id === id);
+  if (!rec) return;
+  if (INTERN_VIEW.view !== 'dashboard') { PENDING_EDIT_EVAL = id; internGoto('dashboard'); return; }
+  populateEvalForm(rec);
+  window.scrollTo({ top: document.getElementById('eval-form').offsetTop - 120, behavior: 'smooth' });
+}
+
+function deleteEvalById(id) {
+  if (!confirm('Bewertung wirklich löschen?')) return;
+  saveEvals(getEvals().filter(r => r.id !== id));
+  if (INTERN_VIEW.view === 'eval') { internGoto('dashboard'); return; }
+  if (INTERN_VIEW.view === 'profile') { renderNow('intern'); return; }
+  refreshInternDashboardLists();
+}
+
+function renderEvalList(opts = {}) {
   const list = document.getElementById('eval-list');
   if (!list) return;
-  const evals = getEvals();
+  let evals = opts.evals || getEvals().slice().sort((a, b) => evalTs(b) - evalTs(a));
+  if (opts.limit) evals = evals.slice(0, opts.limit);
 
   if (!evals.length) {
     list.innerHTML = '<p style="color:var(--text-muted);font-family:var(--font-mono);font-size:.85rem;">// KEINE AKTEN VORHANDEN</p>';
@@ -1110,14 +1383,15 @@ function renderEvalList() {
     <div class="eval-card">
       <div class="eval-head">
         <div>
-          <div class="eval-name">${esc(rec.name)}</div>
+          <div class="eval-name eval-name-link" data-open-pilot="${esc(pilotKeyOf(rec))}">${esc(rec.name)}${rec.callsign ? ` <span class="pilot-cs">[${esc(rec.callsign)}]</span>` : ''}</div>
           <div class="eval-meta">${esc(rec.date)} // PRÜFER: ${esc(rec.pruefer)}</div>
         </div>
-        <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
           <span class="db-badge ${evalStatus(rec) === 'BESTANDEN' ? 'warn' : ''}">${evalStatus(rec)}</span>
           <span class="db-badge">Ø ${rec.avg.toFixed(1)}</span>
+          <button class="btn btn-small magnetic" data-open-eval="${rec.id}">Details</button>
           <button class="btn btn-small magnetic" data-ev-edit="${rec.id}">Bearbeiten</button>
-          <button class="btn btn-small magnetic" data-ev-del="${rec.id}">Löschen</button>
+          <button class="btn btn-small magnetic" data-ev-del="${rec.id}" style="border-color:var(--danger);color:var(--danger);">Löschen</button>
         </div>
       </div>
       <div class="eval-body">
@@ -1135,40 +1409,64 @@ function renderEvalList() {
     </div>
   `).join('');
 
-  list.querySelectorAll('[data-ev-del]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      if (!confirm('Bewertung wirklich löschen?')) return;
-      saveEvals(getEvals().filter(r => r.id !== btn.dataset.evDel));
-      renderEvalList();
-    });
-  });
+  list.querySelectorAll('[data-open-pilot]').forEach(el =>
+    el.addEventListener('click', () => internGoto('profile', { pilotKey: el.dataset.openPilot })));
+  list.querySelectorAll('[data-open-eval]').forEach(el =>
+    el.addEventListener('click', () => internGoto('eval', { evalId: el.dataset.openEval })));
+  list.querySelectorAll('[data-ev-edit]').forEach(btn =>
+    btn.addEventListener('click', () => editEvalById(btn.dataset.evEdit)));
+  list.querySelectorAll('[data-ev-del]').forEach(btn =>
+    btn.addEventListener('click', () => deleteEvalById(btn.dataset.evDel)));
+}
 
-  list.querySelectorAll('[data-ev-edit]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const rec = getEvals().find(r => r.id === btn.dataset.evEdit);
-      if (!rec) return;
-      document.getElementById('ev-id').value = rec.id;
-      document.getElementById('ev-name').value = rec.name;
-      document.getElementById('ev-theorie-ok').checked = !!rec.theorie;
-      document.getElementById('ev-s1-zeit').value = rec.s1.zeit || '';
-      document.getElementById('ev-s1-hits').value = rec.s1.hits || '';
-      document.getElementById('ev-s1-ok').checked = !!rec.s1.ok;
-      document.getElementById('ev-s2-zeit').value = rec.s2.zeit || '';
-      document.getElementById('ev-s2-hits').value = rec.s2.hits || '';
-      document.getElementById('ev-s2-ok').checked = !!rec.s2.ok;
-      document.getElementById('ev-einsatz-ok').checked = !!rec.einsatz.ok;
-      document.getElementById('ev-notes').value = rec.notes || '';
-      RATING_CRITERIA.forEach(c => {
-        const val = rec.ratings[c.key] ?? 5;
-        document.getElementById('ev-r-' + c.key).value = val;
-        document.getElementById('ev-rv-' + c.key).innerText = val;
-      });
-      document.getElementById('ev-submit').innerText = 'Aktualisieren';
-      document.getElementById('ev-cancel').style.display = '';
-      document.getElementById('ev-avg').dispatchEvent(new Event('refresh'));
-      window.scrollTo({ top: document.getElementById('eval-form').offsetTop - 120, behavior: 'smooth' });
-    });
-  });
+function renderPilotList() {
+  const el = document.getElementById('pilot-list');
+  if (!el) return;
+  const pilots = buildPilots();
+  if (!pilots.length) {
+    el.innerHTML = '<p style="color:var(--text-muted);font-family:var(--font-mono);font-size:.85rem;">// KEINE PILOTEN</p>';
+    return;
+  }
+  el.innerHTML = pilots.map(p => `
+    <div class="pilot-row" data-open-pilot="${esc(p.key)}">
+      <div>
+        <div class="pilot-name">${esc(p.name)}${p.callsign ? ` <span class="pilot-cs">[${esc(p.callsign)}]</span>` : ''}</div>
+        <div class="pilot-sub">${esc(p.role || (p.inTeam ? '—' : 'Nicht im Team'))}</div>
+      </div>
+      <div class="pilot-stats">
+        <span class="db-badge">${p.count} ${p.count === 1 ? 'Akte' : 'Akten'}</span>
+        ${p.avgAll != null ? `<span class="db-badge warn">Ø ${p.avgAll.toFixed(1)}</span>` : ''}
+        ${p.latest ? `<span class="tag ${evalStatus(p.latest) === 'BESTANDEN' ? 'ok' : 'fail'}">${evalStatus(p.latest)}</span>` : ''}
+      </div>
+    </div>`).join('');
+  el.querySelectorAll('[data-open-pilot]').forEach(row =>
+    row.addEventListener('click', () => internGoto('profile', { pilotKey: row.dataset.openPilot })));
+}
+
+function refreshInternDashboardLists() {
+  renderPilotList();
+  renderEvalList({ limit: 10 });
+}
+
+// Steuerung für Profil- und Detailansicht (Zurück, Profil-/Akten-Sprünge).
+function bindProfileControls() {
+  const back = document.getElementById('back-dash');
+  if (back) back.addEventListener('click', () => internGoto('dashboard'));
+  document.querySelectorAll('[data-prog]').forEach(row =>
+    row.addEventListener('click', () => internGoto('eval', { evalId: row.dataset.prog })));
+  const p = pilotByKey(INTERN_VIEW.pilotKey);
+  renderEvalList({ evals: p ? p.evals : [] });
+}
+
+function bindEvalControls() {
+  const back = document.getElementById('back-dash');
+  if (back) back.addEventListener('click', () => internGoto('dashboard'));
+  document.querySelectorAll('[data-open-pilot]').forEach(el =>
+    el.addEventListener('click', () => internGoto('profile', { pilotKey: el.dataset.openPilot })));
+  document.querySelectorAll('[data-ev-edit]').forEach(btn =>
+    btn.addEventListener('click', () => editEvalById(btn.dataset.evEdit)));
+  document.querySelectorAll('[data-ev-del]').forEach(btn =>
+    btn.addEventListener('click', () => deleteEvalById(btn.dataset.evDel)));
 }
 
 function initIntern() {
@@ -1192,13 +1490,26 @@ function initIntern() {
     return;
   }
 
-  // ── Dashboard-Ansicht ──
+  // ── Logout (in allen Ansichten verfügbar) ──
   const logoutBtn = document.getElementById('logout-btn');
   if (!logoutBtn) return;
   logoutBtn.addEventListener('click', () => {
     sessionStorage.removeItem('asd_user');
     sessionStorage.removeItem('asd_auth');
+    INTERN_VIEW = { view: 'dashboard', pilotKey: null, evalId: null };
     render('intern');
+  });
+
+  // ── Unteransichten ──
+  if (INTERN_VIEW.view === 'profile') { bindProfileControls(); return; }
+  if (INTERN_VIEW.view === 'eval') { bindEvalControls(); return; }
+
+  // ── Dashboard-Ansicht ──
+  const pilotSel = document.getElementById('ev-pilot');
+  const nameInput = document.getElementById('ev-name');
+  pilotSel.addEventListener('change', () => {
+    if (pilotSel.value === '__manual__') { nameInput.style.display = ''; nameInput.focus(); }
+    else { nameInput.style.display = 'none'; }
   });
 
   const updateAvg = () => {
@@ -1223,6 +1534,8 @@ function initIntern() {
     form.reset();
     document.getElementById('ev-id').value = '';
     document.getElementById('ev-pruefer').value = getSession();
+    document.getElementById('ev-pilot').value = '';
+    nameInput.style.display = 'none';
     RATING_CRITERIA.forEach(c => {
       document.getElementById('ev-r-' + c.key).value = 5;
       document.getElementById('ev-rv-' + c.key).innerText = '5';
@@ -1236,6 +1549,17 @@ function initIntern() {
 
   document.getElementById('eval-form').addEventListener('submit', e => {
     e.preventDefault();
+
+    // Pilot bestimmen: aus Team gewählt oder manuell eingegeben
+    const selVal = document.getElementById('ev-pilot').value;
+    let pilotId = '', name = '', callsign = '';
+    if (selVal && selVal !== '__manual__') {
+      const m = getTeam().find(x => x.id === selVal);
+      if (m) { pilotId = m.id; name = m.name; callsign = m.callsign; }
+    }
+    if (!pilotId) name = nameInput.value.trim();
+    if (!name) { alert('Bitte einen Piloten aus dem Team wählen oder einen Namen manuell eingeben.'); return; }
+
     const ratings = {};
     RATING_CRITERIA.forEach(c => ratings[c.key] = +document.getElementById('ev-r-' + c.key).value);
 
@@ -1245,7 +1569,10 @@ function initIntern() {
 
     const rec = {
       id: existing ? existing.id : Date.now().toString(36),
-      name: document.getElementById('ev-name').value.trim(),
+      ts: existing ? (existing.ts || evalTs(existing)) : Date.now(),
+      pilotId,
+      callsign,
+      name,
       pruefer: getSession(),
       date: existing ? existing.date : new Date().toLocaleDateString('de-DE') + ' ' + new Date().toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }),
       theorie: document.getElementById('ev-theorie-ok').checked,
@@ -1273,16 +1600,26 @@ function initIntern() {
     saveEvals(evals);
 
     resetEvalForm();
-    renderEvalList();
-    window.scrollTo({ top: document.getElementById('eval-list').offsetTop - 120, behavior: 'smooth' });
+    refreshInternDashboardLists();
+    window.scrollTo({ top: document.getElementById('pilot-list').offsetTop - 120, behavior: 'smooth' });
   });
 
-  renderEvalList();
+  refreshInternDashboardLists();
   initTeamAdmin();
   initDataAdmin();
 
-  // Im Server-Modus: Akten vom Server holen und Liste aktualisieren
-  pullServerEvals().then(ok => { if (ok) renderEvalList(); });
+  // Aus Profil/Detail zum Bearbeiten gewechselt: Formular füllen
+  if (PENDING_EDIT_EVAL) {
+    const rec = getEvals().find(r => r.id === PENDING_EDIT_EVAL);
+    PENDING_EDIT_EVAL = null;
+    if (rec) {
+      populateEvalForm(rec);
+      window.scrollTo({ top: document.getElementById('eval-form').offsetTop - 120, behavior: 'smooth' });
+    }
+  }
+
+  // Im Server-Modus: Akten vom Server holen und Listen aktualisieren
+  pullServerEvals().then(ok => { if (ok) refreshInternDashboardLists(); });
 }
 
 function renderTeamAdmin() {
@@ -1451,6 +1788,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   window.addEventListener('popstate', e => {
     if (EDIT_MODE) { CONTENT = loadContent(); EDIT_MODE = false; }
+    INTERN_VIEW = { view: 'dashboard', pilotKey: null, evalId: null };
     render(e.state?.page || 'startseite');
   });
 
