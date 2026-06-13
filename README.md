@@ -9,11 +9,19 @@ Voraussetzung: Node.js (keine weiteren Abhängigkeiten, kein `npm install`).
 ```
 node server.js
 ```
+(oder `npm start` — macht dasselbe)
 
 - Läuft standardmäßig auf Port **8080** (änderbar über die Umgebungsvariable `PORT`).
 - Der Server liefert die Seite aus **und** speichert alle Daten direkt im Projektordner:
   - `data.json` — Seiteninhalte + Team (öffentlich lesbar)
   - `evals.json` — Bewertungsakten (nur mit Login abrufbar, wird automatisch angelegt)
+
+> **Wichtig:** Die Seite muss **von `node server.js`** ausgeliefert werden, damit
+> zentral gespeichert wird. Zum Prüfen: Seite → „Intern" → einloggen → Abschnitt
+> „Daten". Dort muss **„SERVER-SPEICHERUNG // AKTIV"** stehen. Steht da
+> „OFFLINE-MODUS", läuft die Seite nicht über den Server (z. B. nur als statische
+> Dateien) — dann `node server.js` starten bzw. im Reverse Proxy **alle** Pfade
+> (inkl. `/api`) auf den Node-Port leiten. Details in der `CLAUDE.md`.
 
 **Wichtig:** `data.json` und `evals.json` sind die Datenbank — nicht löschen oder
 durch alte Versionen ersetzen. Beide stehen bereits in der `.gitignore`, dadurch

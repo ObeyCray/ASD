@@ -1,0 +1,12 @@
+{
+  "name": "asd-op-com",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A.S.D. OP-COM — Handbuch-Website der Air Support Division (statische SPA + Mini-Server, keine Abhängigkeiten)",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
