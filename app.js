@@ -174,6 +174,23 @@ const DEFAULT_CONTENT = {
 
   flugsteuerung: {
     text: 'Das sind reine Empfehlungen. Jeder Pilot fliegt anders, aber dies ist die anfängerfreundlichste und komfortabelste Steuerung.',
+    keybinds: [
+      { fn: 'Schub erhöhen', primary: '', secondary: 'Mausrad ↑' },
+      { fn: 'Schub verringern', primary: '', secondary: 'Mausrad ↓' },
+      { fn: 'Fahrzeug nach links drehen', primary: '', secondary: 'Q' },
+      { fn: 'Fahrzeug nach rechts drehen', primary: '', secondary: 'Strg L' },
+      { fn: 'Rolle nach links', primary: '', secondary: 'A' },
+      { fn: 'Rolle nach rechts', primary: '', secondary: 'D' },
+      { fn: 'Fahrzeug nach unten neigen', primary: '', secondary: 'W' },
+      { fn: 'Fahrzeug nach oben neigen', primary: '', secondary: 'S' },
+      { fn: 'Waffe abfeuern', primary: '', secondary: 'Maustaste' },
+      { fn: 'Nächstes Ziel links', primary: 'Num 7', secondary: '' },
+      { fn: 'Nächstes Ziel rechts', primary: 'Num 9', secondary: '' },
+      { fn: 'Fahrwerk (Drück.) / Senkrechtst.-Mod. (Halt.)', primary: 'G', secondary: '' },
+      { fn: 'Greifhaken', primary: 'E', secondary: '' },
+      { fn: 'Fahrzeug-Waffenkamera umschalten', primary: 'Einfg', secondary: '' },
+      { fn: 'Flug-Maussteuerung überschreiben (Halten)', primary: 'Bild ↓', secondary: '' }
+    ],
     alert: {
       title: 'CRITICAL ERROR AVOIDANCE',
       text: 'Es darf kein rotes Ausrufezeichen in der Keybind-Übersicht vorhanden sein. Alles MUSS belegt sein.'
@@ -270,18 +287,27 @@ async function pullServerEvals() {
   return false;
 }
 
+// Füllt fehlende Felder aus den Defaults nach (z.B. Tastenbelegung in
+// älteren Datenständen), ohne vorhandene Inhalte zu überschreiben.
+function withDefaults(c) {
+  if (c && c.flugsteuerung && !Array.isArray(c.flugsteuerung.keybinds)) {
+    c.flugsteuerung.keybinds = JSON.parse(JSON.stringify(DEFAULT_CONTENT.flugsteuerung.keybinds));
+  }
+  return c;
+}
+
 function loadContent() {
   if (SERVER_MODE && PUBLISHED && PUBLISHED.content) {
-    return JSON.parse(JSON.stringify(PUBLISHED.content)); // Server ist die Wahrheit
+    return withDefaults(JSON.parse(JSON.stringify(PUBLISHED.content))); // Server ist die Wahrheit
   }
   try {
     const stored = JSON.parse(localStorage.getItem('asd_content'));
     if (stored && stored.data) {
-      if (!PUBLISHED || stored.basedOn === PUBLISHED.updated) return stored.data;
+      if (!PUBLISHED || stored.basedOn === PUBLISHED.updated) return withDefaults(stored.data);
       localStorage.removeItem('asd_content'); // veröffentlichter Stand ist neuer
     }
   } catch {}
-  if (PUBLISHED && PUBLISHED.content) return JSON.parse(JSON.stringify(PUBLISHED.content));
+  if (PUBLISHED && PUBLISHED.content) return withDefaults(JSON.parse(JSON.stringify(PUBLISHED.content)));
   return JSON.parse(JSON.stringify(DEFAULT_CONTENT));
 }
 function saveContent() {
@@ -307,7 +333,8 @@ const ADD_TEMPLATES = {
   rang:  () => ({ num: 'R?', name: 'Neuer Rang' }),
   cert:  () => ({ title: 'NEUE FORTBILDUNG', badge: 'INFO', text: 'Beschreibung' }),
   block: () => ({ title: 'NEU', badge: 'STANDARD', rows: [{ l: 'Torso', v: '-' }] }),
-  group: () => ({ group: 'NEUE GRUPPE', blocks: [] })
+  group: () => ({ group: 'NEUE GRUPPE', blocks: [] }),
+  keybind: () => ({ fn: 'Neue Funktion', primary: '', secondary: '' })
 };
 
 // Editierbarer Text: im Bearbeiten-Modus contenteditable, sonst normal.
@@ -708,6 +735,26 @@ const pages = {
           <h3 class="alert-title">${E('flugsteuerung.alert.title', CONTENT.flugsteuerung.alert.title)}</h3>
           <p class="alert-desc">${E('flugsteuerung.alert.text', CONTENT.flugsteuerung.alert.text)}</p>
         </div>
+      </div>
+    </section>
+
+    <section class="section" style="border-bottom:none;">
+      <div class="section-meta"><div class="sm-title">TASTENBELEGUNG</div></div>
+      <div class="section-content">
+        <div class="keybind-table">
+          <div class="kb-row kb-head${EDIT_MODE ? ' kb-edit' : ''}">
+            <span>FUNKTION</span><span>PRIMÄR</span><span>SEKUNDÄR</span>
+            ${EDIT_MODE ? '<span></span>' : ''}
+          </div>
+          ${(CONTENT.flugsteuerung.keybinds || []).map((k, i) => `
+          <div class="kb-row${EDIT_MODE ? ' kb-edit' : ''}">
+            <span class="kb-fn">${E(`flugsteuerung.keybinds.${i}.fn`, k.fn)}</span>
+            <span class="kb-key">${k.primary || EDIT_MODE ? `<kbd>${E(`flugsteuerung.keybinds.${i}.primary`, k.primary)}</kbd>` : ''}</span>
+            <span class="kb-key">${k.secondary || EDIT_MODE ? `<kbd>${E(`flugsteuerung.keybinds.${i}.secondary`, k.secondary)}</kbd>` : ''}</span>
+            ${DELBTN('flugsteuerung.keybinds', i)}
+          </div>`).join('')}
+        </div>
+        ${ADDBTN('flugsteuerung.keybinds', 'keybind', 'Tastenbelegung')}
       </div>
     </section>
   `,
